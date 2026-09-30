@@ -6,7 +6,6 @@
 enum AppView {
     VIEW_MAIN = 0,
     VIEW_GRAPH1,
-    VIEW_GRAPH2,
     VIEW_SETTINGS
 };
 
@@ -25,16 +24,35 @@ public:
     void switchView(AppView view);
     AppView getCurrentView() const { return currentView; }
 
+    // Đồng bộ dữ liệu y sinh & AI thời gian thực
+    void pushRealECGSample(float filteredVal);
+    void pushRealECGSamples(float rawVal, float filteredVal);
+    void setBiometrics(float ecgBpm, float spo2, float ppgBpm, int aiClass, const char* aiClassName);
+
     void setLanguage(AppLanguage lang);
     void toggleLanguage();
     AppLanguage getLanguage() const { return currentLang; }
     const char* tr(const char* vi, const char* en) const { return (currentLang == LANG_VI) ? vi : en; }
+
+    bool isAiEnabled() const { return aiEnabled; }
+    void setAiEnabled(bool en) { aiEnabled = en; }
+    void toggleAiEnabled() { aiEnabled = !aiEnabled; }
 
 private:
     DisplayManager& display;
     CornerGif* cornerGif = nullptr;
     AppView currentView = VIEW_MAIN;
     AppLanguage currentLang = LANG_VI;
+
+    // Biến lưu trữ dữ liệu y sinh thực tế
+    float realEcgBpm = 0.0f;
+    float realSpO2 = 0.0f;
+    float realPpgBpm = 0.0f;
+    int realAiClass = 0;
+    String realAiClassName = "Normal (N)";
+    float latestRealECG = 1.65f;
+    volatile float latestRealRaw = 2048.0f;
+    volatile float latestRealFilt = 0.0f;
 
     // --- Navigation & Header ---
     void drawNavBar();
@@ -54,28 +72,22 @@ private:
     bool showingPetReaction = false;
     uint32_t petReactionStartTime = 0;
 
-    // --- View 1: Plot Graph 1 (Thời gian thực) ---
+    // --- View 1: Plot Graph 1 (2 tầng: Raw Đỏ + Filtered Xanh lá giống Python GUI) ---
     void drawGraph1View();
     void updateGraph1Wave();
-    static constexpr uint8_t WAVE_POINTS = 70;
-    float waveBuffer[WAVE_POINTS];
-    uint8_t waveMode = 0; // 0: Sine, 1: ECG (Nhịp tim), 2: Tam giác
-    uint8_t waveSpeed = 1; // 1x, 2x, 4x
-    bool wavePaused = false;
+    static constexpr uint16_t PLOT_X = 45;
+    static constexpr uint16_t PLOT_W = 415;
+    uint16_t sweepX = 0;
+    int16_t lastRawY = -1;
+    int16_t lastFiltY = -1;
     uint32_t lastWaveTick = 0;
+    uint32_t lastGraphTextUpdate = 0;
+    bool wavePaused = false;
     float wavePhase = 0.0f;
 
-    // --- View 2: Plot Graph 2 (Đa kênh phân tích) ---
-    void drawGraph2View();
-    void randomizeGraph2Bars();
-    void drawBarInspector();
-    uint8_t barValues[6] = { 78, 62, 85, 48, 35, 92 };
-    int8_t selectedBar = -1; // Cột đang được chọn xem chi tiết (-1: chưa chọn)
-    bool liveStreamBars = true;
-    uint32_t lastBarStreamTick = 0;
-
-    // --- View 3: Cài đặt ---
+    // --- View 2: Cài đặt hệ thống & Tuỳ chọn AI ---
     void drawSettingsView();
+    bool aiEnabled = true;
     uint8_t brightnessStep = 4; // 1..5
     uint8_t petTimeoutSec = 6;  // 4s, 6s, 10s
     void applyBrightness(uint8_t step);

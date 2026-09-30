@@ -22,64 +22,56 @@ struct LocalizedAdvice {
     const char* en;
 };
 
-// Danh sách lời khuyên phong phú từ Ami
+// Danh sách lời khuyên y tế & chăm sóc sức khỏe tim mạch từ Ami
 static const LocalizedAdvice s_adviceList[] = {
     {
-        "ESP32-S3 đã sẵn sàng! Hệ thống vận hành rất mượt mà.",
-        "ESP32-S3 is online! System is running smooth and stable."
+        "Hãy ngồi thả lỏng và thở đều khi đo điện tim ECG nhé!",
+        "Stay relaxed and breathe evenly during ECG recording!"
     },
     {
-        "Đồ thị 1 hỗ trợ 3 sóng: Sine, Nhịp tim và Tam giác.",
-        "Graph 1 supports 3 waves: Sine, Heartbeat, and Triangle."
+        "Giữ các điện cực dán sát da để tín hiệu tim luôn rõ nét.",
+        "Keep electrode pads firmly attached for a clean signal."
     },
     {
-        "Đồ thị 2 so sánh 6 kênh đo. Chạm cột xem chi tiết!",
-        "Graph 2 tracks 6 channels. Tap any bar for details!"
+        "Đặt ngón tay nhẹ nhàng lên cảm biến để đo SpO2 chuẩn xác.",
+        "Rest your finger gently on the sensor for accurate SpO2."
     },
     {
-        "RAM dồi dào, chip lõi kép Xtensa xử lý siêu tốc!",
-        "RAM is plentiful, Xtensa dual-core is blazingly fast!"
+        "Mô hình AI đang theo dõi từng nhịp đập để phát hiện bất thường.",
+        "AI model is analyzing each heartbeat to detect arrhythmias."
     },
     {
-        "Bạn có thể xoa đầu hoặc vuốt má để chơi cùng Ami nhé!",
-        "Stroke Ami's head or tap cheeks to play together!"
+        "Hạn chế cử động cơ thể khi đang ghi sóng điện tim.",
+        "Minimize motion while recording ECG to prevent artifacts."
     },
     {
-        "Vào menu Cài đặt để tùy chỉnh thời lượng vuốt ve Ami.",
-        "Visit Settings to customize Ami's petting duration."
+        "Nhịp tim người trưởng thành khi nghỉ thường từ 60-100 BPM.",
+        "Normal resting adult heart rate is between 60-100 BPM."
     },
     {
-        "Độ sáng màn hình có 5 mức giúp bảo vệ đôi mắt bạn.",
-        "Screen brightness has 5 levels to protect your eyes."
+        "Chỉ số SpO2 trên 95% thể hiện lượng oxy trong máu rất tốt!",
+        "SpO2 above 95% indicates healthy blood oxygen levels!"
     },
     {
-        "Bạn đã làm việc chăm chỉ, hãy uống nước và nghỉ chút!",
-        "You worked hard! Take a sip of water and stretch!"
+        "Uống đủ nước và ngủ đủ giấc giúp trái tim luôn khỏe mạnh!",
+        "Stay hydrated and sleep well for a strong, healthy heart!"
     },
     {
-        "ESP32-S3 có cảm biến nhiệt độ bên trong đo liên tục.",
-        "ESP32-S3 internal temperature sensor monitors in real-time."
+        "Nếu thấy căng thẳng, hãy hít sâu 4 giây rồi thở ra từ từ.",
+        "Feeling stressed? Inhale deeply for 4s, then exhale slowly."
     },
     {
-        "Mọi thao tác chạm cảm ứng đều được lọc nhiễu chính xác.",
-        "Touch screen is debounced and calibrated accurately."
-    },
-    {
-        "Ami chúc bạn một ngày ngập tràn niềm vui và may mắn!",
-        "Ami wishes you an awesome day full of happiness!"
-    },
-    {
-        "Nếu cảm ứng bị lệch, hãy cân chỉnh lại trong Cài đặt.",
-        "If touch feels off, re-calibrate anytime in Settings."
+        "Ami chúc bạn và trái tim luôn dồi dào năng lượng tích cực!",
+        "Ami wishes you and your heart full of vibrant energy!"
     }
 };
 static const size_t s_adviceCount = sizeof(s_adviceList) / sizeof(s_adviceList[0]);
 
 AppUI::AppUI(DisplayManager& displayManager)
     : display(displayManager) {
-    for (uint8_t i = 0; i < WAVE_POINTS; i++) {
-        waveBuffer[i] = 1.65f;
-    }
+    sweepX = 0;
+    lastRawY = -1;
+    lastFiltY = -1;
 }
 
 void AppUI::init() {
@@ -107,6 +99,31 @@ void AppUI::setCornerGif(CornerGif* gif) {
     }
 }
 
+void AppUI::pushRealECGSample(float filteredVal) {
+    pushRealECGSamples(2048.0f, filteredVal);
+}
+
+void AppUI::pushRealECGSamples(float rawVal, float filteredVal) {
+    latestRealRaw = rawVal;
+    latestRealFilt = filteredVal;
+    
+    // Chuyển biên độ filteredVal (-500..+1000) thành dải hiển thị 0.3V - 3.0V
+    float volt = 1.65f + (filteredVal / 800.0f);
+    if (volt > 3.2f) volt = 3.2f;
+    if (volt < 0.1f) volt = 0.1f;
+    latestRealECG = volt;
+}
+
+void AppUI::setBiometrics(float ecgBpm, float spo2, float ppgBpm, int aiClass, const char* aiClassName) {
+    realEcgBpm = ecgBpm;
+    realSpO2 = spo2;
+    realPpgBpm = ppgBpm;
+    realAiClass = aiClass;
+    if (aiClassName) {
+        realAiClassName = String(aiClassName);
+    }
+}
+
 void AppUI::setLanguage(AppLanguage lang) {
     if (currentLang == lang) return;
     currentLang = lang;
@@ -120,7 +137,6 @@ void AppUI::setLanguage(AppLanguage lang) {
     switch (currentView) {
         case VIEW_MAIN:     drawMainView(); break;
         case VIEW_GRAPH1:   drawGraph1View(); break;
-        case VIEW_GRAPH2:   drawGraph2View(); break;
         case VIEW_SETTINGS: drawSettingsView(); break;
     }
 }
@@ -144,9 +160,6 @@ void AppUI::switchView(AppView view) {
             break;
         case VIEW_GRAPH1:
             drawGraph1View();
-            break;
-        case VIEW_GRAPH2:
-            drawGraph2View();
             break;
         case VIEW_SETTINGS:
             drawSettingsView();
@@ -172,8 +185,7 @@ void AppUI::drawHeader() {
 
     const char* title = "ESP32-S3 COMPANION";
     if (currentView == VIEW_MAIN)     title = tr("TRANG CHỦ (DASHBOARD)", "HOME DASHBOARD");
-    if (currentView == VIEW_GRAPH1)   title = tr("ĐỒ THỊ 1 (THỜI GIAN THỰC)", "GRAPH 1 (REAL-TIME)");
-    if (currentView == VIEW_GRAPH2)   title = tr("ĐỒ THỊ 2 (PHÂN TÍCH ĐA KÊNH)", "GRAPH 2 (TELEMETRY)");
+    if (currentView == VIEW_GRAPH1)   title = tr("ĐỒ THỊ ECG (THỜI GIAN THỰC)", "ECG GRAPH (REAL-TIME)");
     if (currentView == VIEW_SETTINGS) title = tr("CÀI ĐẶT HỆ THỐNG", "SYSTEM SETTINGS");
 
     tft.drawString(title, 28, 18);
@@ -214,12 +226,12 @@ void AppUI::drawNavBar() {
     tft.fillRect(0, 280, 480, 40, CLR_SURFACE);
     tft.drawFastHLine(0, 279, 480, CLR_BORDER);
 
-    const char* const tabs_vi[] = { "TRANG CHỦ", "ĐỒ THỊ 1", "ĐỒ THỊ 2", "CÀI ĐẶT" };
-    const char* const tabs_en[] = { "HOME", "GRAPH 1", "GRAPH 2", "SETTINGS" };
+    const char* const tabs_vi[] = { "TRANG CHỦ", "ĐỒ THỊ ECG", "CÀI ĐẶT" };
+    const char* const tabs_en[] = { "HOME", "ECG GRAPH", "SETTINGS" };
     const char* const* tabs = (currentLang == LANG_VI) ? tabs_vi : tabs_en;
-    const uint16_t tabW = 120;
+    const uint16_t tabW = 160;
 
-    for (uint8_t i = 0; i < 4; i++) {
+    for (uint8_t i = 0; i < 3; i++) {
         uint16_t tx = i * tabW;
         bool isActive = (currentView == (AppView)i);
 
@@ -249,22 +261,22 @@ void AppUI::drawMainView() {
     // 1. Khung lời khuyên từ Ami
     drawAdviceBubble();
 
-    // 2. Hai thẻ thông số phần cứng
-    // Thẻ 1: CPU & Nhiệt độ
-    tft.fillRoundRect(10, 164, 124, 108, 8, CLR_SURFACE);
-    tft.drawRoundRect(10, 164, 124, 108, 8, CLR_BORDER);
+    // 2. Hai thẻ thông số y sinh thời gian thực
+    // Thẻ 1: Điện tim ECG & Chẩn đoán AI (x: 10, y: 164, w: 125, h: 108)
+    tft.fillRoundRect(10, 164, 125, 108, 8, CLR_SURFACE);
+    tft.drawRoundRect(10, 164, 125, 108, 8, CLR_BORDER);
     tft.setTextColor(CLR_SILVER, CLR_SURFACE);
-    tft.setTextDatum(TL_DATUM);
-    tft.drawString(tr("CPU & NHIỆT ĐỘ", "CPU & TEMP"), 18, 172);
+    tft.setTextDatum(TC_DATUM);
+    tft.drawString(tr("ĐIỆN TIM & AI", "ECG & AI"), 72, 172);
 
-    // Thẻ 2: Bộ nhớ RAM
-    tft.fillRoundRect(144, 164, 124, 108, 8, CLR_SURFACE);
-    tft.drawRoundRect(144, 164, 124, 108, 8, CLR_BORDER);
+    // Thẻ 2: Cảm biến SpO2 & Quang tim (x: 145, y: 164, w: 125, h: 108)
+    tft.fillRoundRect(145, 164, 125, 108, 8, CLR_SURFACE);
+    tft.drawRoundRect(145, 164, 125, 108, 8, CLR_BORDER);
     tft.setTextColor(CLR_SILVER, CLR_SURFACE);
-    tft.setTextDatum(TL_DATUM);
-    tft.drawString(tr("BỘ NHỚ RAM", "RAM MEMORY"), 152, 172);
+    tft.setTextDatum(TC_DATUM);
+    tft.drawString(tr("OXY & MẠCH", "SPO2 & PULSE"), 207, 172);
 
-    // Đọc thông số phần cứng thực tế từ ESP32-S3
+    // Cập nhật thông số thực tế
     updateRealMetrics();
 
     // 3. Linh vật Ami ở góc trên bên phải
@@ -278,38 +290,60 @@ void AppUI::updateRealMetrics() {
     if (currentView != VIEW_MAIN) return;
 
     TFT_eSPI& tft = display.getTft();
-
-    // 1. Nhiệt độ chip thực tế
-    float tempC = temperatureRead();
-    if (tempC < 15.0f || tempC > 95.0f) tempC = 37.8f; // Fallback an toàn
-
-    // Thẻ 1: Nhiệt độ CPU
-    tft.fillRect(18, 196, 110, 24, CLR_SURFACE);
-    tft.setTextColor(tempC > 55.0f ? CLR_AMBER : CLR_CYAN, CLR_SURFACE);
-    tft.setTextDatum(TL_DATUM);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%.1f°C", tempC);
-    tft.drawString(buf, 18, 196);
 
-    tft.fillRect(18, 246, 110, 20, CLR_SURFACE);
-    tft.setTextColor(CLR_GREEN, CLR_SURFACE);
-    tft.drawString(tr("[ ỔN ĐỊNH 240M ]", "[ STABLE 240M ]"), 18, 246);
+    // --- THẺ 1: ECG BPM & CHẨN ĐOÁN AI ---
+    tft.fillRect(12, 194, 121, 26, CLR_SURFACE);
+    tft.setTextColor(CLR_RED, CLR_SURFACE);
+    tft.setTextDatum(TC_DATUM);
+    if (realEcgBpm > 0) {
+        snprintf(buf, sizeof(buf), "%.0f BPM", realEcgBpm);
+    } else {
+        snprintf(buf, sizeof(buf), "-- BPM");
+    }
+    tft.drawString(buf, 72, 196);
 
-    // 2. RAM thực tế từ ESP32-S3
-    uint32_t freeH = ESP.getFreeHeap() / 1024;
-    uint32_t totalH = ESP.getHeapSize() / 1024;
-    if (totalH == 0) totalH = 320;
-    uint32_t usedH = (totalH > freeH) ? (totalH - freeH) : 44;
+    tft.fillRect(12, 240, 121, 26, CLR_SURFACE);
+    tft.setTextDatum(TC_DATUM);
+    if (!aiEnabled) {
+        tft.setTextColor(CLR_SILVER, CLR_SURFACE);
+        tft.drawString(tr("[ AI: ĐÃ TẮT ]", "[ AI: OFF ]"), 72, 246);
+    } else {
+        tft.setTextColor(realAiClass == 0 ? CLR_GREEN : (realAiClass == 2 ? CLR_RED : CLR_AMBER), CLR_SURFACE);
+        if (realAiClass == 0) {
+            snprintf(buf, sizeof(buf), tr("Bình thường (N)", "Normal (N)"));
+        } else if (realAiClass == 2) {
+            snprintf(buf, sizeof(buf), tr("Ngoại tâm (V)", "PVC Beat (V)"));
+        } else if (realAiClass == 1) {
+            snprintf(buf, sizeof(buf), tr("Trên thất (S)", "Supravent (S)"));
+        } else if (realAiClass == 3) {
+            snprintf(buf, sizeof(buf), tr("Hỗn hợp (F)", "Fusion (F)"));
+        } else {
+            snprintf(buf, sizeof(buf), "%s", realAiClassName.c_str());
+        }
+        tft.drawString(buf, 72, 246);
+    }
 
-    tft.fillRect(152, 196, 110, 24, CLR_SURFACE);
+    // --- THẺ 2: SPO2 & PPG PULSE RATE ---
+    tft.fillRect(147, 194, 121, 26, CLR_SURFACE);
+    tft.setTextColor(CLR_CYAN, CLR_SURFACE);
+    tft.setTextDatum(TC_DATUM);
+    if (realSpO2 > 0) {
+        snprintf(buf, sizeof(buf), "%.0f%% SpO2", realSpO2);
+    } else {
+        snprintf(buf, sizeof(buf), "--%% SpO2");
+    }
+    tft.drawString(buf, 207, 196);
+
+    tft.fillRect(147, 240, 121, 26, CLR_SURFACE);
     tft.setTextColor(CLR_AMBER, CLR_SURFACE);
-    snprintf(buf, sizeof(buf), "%u KB", (unsigned int)usedH);
-    tft.drawString(buf, 152, 196);
-
-    tft.fillRect(152, 246, 110, 20, CLR_SURFACE);
-    tft.setTextColor(CLR_GREEN, CLR_SURFACE);
-    snprintf(buf, sizeof(buf), tr("%uKB trống/320K", "%uKB free/320K"), (unsigned int)freeH);
-    tft.drawString(buf, 152, 246);
+    tft.setTextDatum(TC_DATUM);
+    if (realPpgBpm > 0) {
+        snprintf(buf, sizeof(buf), "Mạch: %.0f", realPpgBpm);
+    } else {
+        snprintf(buf, sizeof(buf), "Mạch: --");
+    }
+    tft.drawString(buf, 207, 246);
 }
 
 void AppUI::drawAdviceBubble(const char* customText) {
@@ -416,273 +450,166 @@ void AppUI::nextAdvice() {
 }
 
 // ==========================================
-// VIEW 1: ĐỒ THỊ 1 (PLOT GRAPH 1 - REAL-TIME)
+// VIEW 1: ĐỒ THỊ 1 (PLOT GRAPH 1 - 2 TẦNG CHUẨN PYTHON GUI)
 // ==========================================
 void AppUI::drawGraph1View() {
     TFT_eSPI& tft = display.getTft();
 
-    const int gx = 15;
-    const int gy = 42;
-    const int gw = 450;
-    const int gh = 180;
+    // Reset trạng thái vệt quét
+    sweepX = 0;
+    lastRawY = -1;
+    lastFiltY = -1;
+    lastGraphTextUpdate = 0;
 
-    tft.fillRect(gx, gy, gw, gh, TFT_BLACK);
-    tft.drawRect(gx, gy, gw, gh, CLR_BORDER);
+    // ========================================================
+    // TẦNG 1 (TRÊN): TÍN HIỆU ĐIỆN TIM THÔ (RAW AD8232) - MÀU ĐỎ
+    // ========================================================
+    const int c1_x = 10, c1_y = 38, c1_w = 460, c1_h = 114;
+    tft.fillRoundRect(c1_x, c1_y, c1_w, c1_h, 6, CLR_SURFACE);
+    tft.drawRoundRect(c1_x, c1_y, c1_w, c1_h, 6, CLR_BORDER);
 
-    // Lưới toạ độ
-    for (int y = gy + 36; y < gy + gh; y += 36) {
-        for (int x = gx + 4; x < gx + gw; x += 10) {
-            tft.drawPixel(x, y, CLR_BORDER);
-        }
-    }
-    for (int x = gx + 75; x < gx + gw; x += 75) {
-        for (int y = gy + 4; y < gy + gh; y += 8) {
-            tft.drawPixel(x, y, CLR_BORDER);
-        }
-    }
-
-    // Nhãn trục Y
-    tft.setTextColor(CLR_SILVER, TFT_BLACK);
+    // Tiêu đề kênh thô (Chữ đỏ như Python GUI)
+    tft.setTextColor(TFT_RED, CLR_SURFACE);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString("3.3V", gx + 4, gy + 4);
-    tft.drawString("2.5V", gx + 4, gy + 45);
-    tft.drawString("1.6V", gx + 4, gy + 88);
-    tft.drawString("0.8V", gx + 4, gy + 130);
-    tft.drawString("0.0V", gx + 4, gy + 168);
+    tft.drawString(tr("TÍN HIỆU THÔ (RAW AD8232)", "RAW SIGNAL (AD8232)"), c1_x + 10, c1_y + 4);
 
-    // Nhãn trục X
-    tft.setTextDatum(BR_DATUM);
-    tft.drawString("-3.0s", gx + 150, gy + gh - 4);
-    tft.drawString("-1.5s", gx + 300, gy + gh - 4);
-    tft.drawString(tr("HIỆN TẠI", "NOW"), gx + gw - 6, gy + gh - 4);
+    // Vùng vẽ sóng thô (Kích thước: 415 x 86)
+    const int p1_x = PLOT_X, p1_y = 58, p1_w = PLOT_W, p1_h = 86;
+    tft.fillRect(p1_x, p1_y, p1_w, p1_h, TFT_BLACK);
+    tft.drawRect(p1_x - 1, p1_y - 1, p1_w + 2, p1_h + 2, CLR_BORDER);
 
-    // Thanh điều khiển (Y: 230..275)
-    tft.fillRoundRect(15, 230, 450, 44, 6, CLR_SURFACE);
-    tft.drawRoundRect(15, 230, 450, 44, 6, CLR_BORDER);
+    // Lưới toạ độ kênh thô (Màu xám tối)
+    for (int y = p1_y + 28; y < p1_y + p1_h; y += 28) {
+        for (int x = p1_x; x < p1_x + p1_w; x += 10) {
+            tft.drawPixel(x, y, 0x2104);
+        }
+    }
+    for (int x = p1_x + 50; x < p1_x + p1_w; x += 50) {
+        for (int y = p1_y; y < p1_y + p1_h; y += 8) {
+            tft.drawPixel(x, y, 0x2104);
+        }
+    }
 
-    // Nút Tốc độ quét: 1X / 2X / 4X
-    tft.fillRoundRect(22, 234, 100, 36, 4, CLR_SURFACE_HI);
-    tft.drawRoundRect(22, 234, 100, 36, 4, CLR_BORDER);
-    tft.setTextColor(CLR_WHITE, CLR_SURFACE_HI);
-    tft.setTextDatum(MC_DATUM);
-    char spdBuf[20];
-    snprintf(spdBuf, sizeof(spdBuf), tr("TỐC ĐỘ: %uX", "SPEED: %uX"), waveSpeed);
-    tft.drawString(spdBuf, 72, 252);
-
-    // Nút Dạng sóng: Sine / Tim / Tam giác
-    tft.fillRoundRect(130, 234, 140, 36, 4, CLR_SURFACE_HI);
-    tft.drawRoundRect(130, 234, 140, 36, 4, CLR_CYAN);
-    const char* const mNames_vi[] = { "SÓNG: SINE", "SÓNG: TIM", "SÓNG: TAM GIÁC" };
-    const char* const mNames_en[] = { "WAVE: SINE", "WAVE: ECG", "WAVE: TRIANGLE" };
-    const char* const* mNames = (currentLang == LANG_VI) ? mNames_vi : mNames_en;
-    tft.drawString(mNames[waveMode], 200, 252);
-
-    // Nút Tạm dừng / Tiếp tục
-    tft.fillRoundRect(280, 234, 95, 36, 4, wavePaused ? CLR_AMBER : CLR_SURFACE_HI);
-    tft.drawRoundRect(280, 234, 95, 36, 4, CLR_WHITE);
-    tft.setTextColor(wavePaused ? TFT_BLACK : CLR_WHITE, wavePaused ? CLR_AMBER : CLR_SURFACE_HI);
-    tft.drawString(wavePaused ? tr("TIẾP TỤC", "RESUME") : tr("TẠM DỪNG", "PAUSE"), 327, 252);
-
-    // Thông số tức thời
-    tft.setTextColor(CLR_CYAN, CLR_SURFACE);
+    // Nhãn trục Y kênh thô (0..4095)
+    tft.setTextColor(CLR_SILVER, CLR_SURFACE);
     tft.setTextDatum(MR_DATUM);
-    tft.drawString("RMS: 2.2V", 455, 252);
+    tft.drawString("4K", p1_x - 4, p1_y + 4);
+    tft.drawString("2K", p1_x - 4, p1_y + 43);
+    tft.drawString("0", p1_x - 4, p1_y + 82);
+
+    // ========================================================
+    // TẦNG 2 (DƯỚI): TÍN HIỆU SẠCH SAU LỌC NOTCH 50Hz - MÀU XANH LÁ
+    // ========================================================
+    const int c2_x = 10, c2_y = 156, c2_w = 460, c2_h = 118;
+    tft.fillRoundRect(c2_x, c2_y, c2_w, c2_h, 6, CLR_SURFACE);
+    tft.drawRoundRect(c2_x, c2_y, c2_w, c2_h, 6, CLR_BORDER);
+
+    // Tiêu đề kênh sạch (Chữ xanh lá như Python GUI)
+    tft.setTextColor(TFT_GREEN, CLR_SURFACE);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(tr("TÍN HIỆU SẠCH (NOTCH 50Hz)", "CLEAN SIGNAL (50Hz NOTCH)"), c2_x + 10, c2_y + 4);
+
+    // Vùng vẽ sóng sạch (Kích thước: 415 x 88)
+    const int p2_x = PLOT_X, p2_y = 178, p2_w = PLOT_W, p2_h = 88;
+    tft.fillRect(p2_x, p2_y, p2_w, p2_h, TFT_BLACK);
+    tft.drawRect(p2_x - 1, p2_y - 1, p2_w + 2, p2_h + 2, CLR_BORDER);
+
+    // Lưới toạ độ kênh sạch
+    for (int y = p2_y + 29; y < p2_y + p2_h; y += 29) {
+        for (int x = p2_x; x < p2_x + p2_w; x += 10) {
+            tft.drawPixel(x, y, 0x2104);
+        }
+    }
+    for (int x = p2_x + 50; x < p2_x + p2_w; x += 50) {
+        for (int y = p2_y; y < p2_y + p2_h; y += 8) {
+            tft.drawPixel(x, y, 0x2104);
+        }
+    }
+
+    // Nhãn trục Y kênh sạch (-500..+1000)
+    tft.setTextColor(CLR_SILVER, CLR_SURFACE);
+    tft.setTextDatum(MR_DATUM);
+    tft.drawString("+1K", p2_x - 4, p2_y + 4);
+    tft.drawString("0", p2_x - 4, p2_y + 44);
+    tft.drawString("-500", p2_x - 4, p2_y + 84);
 }
 
 void AppUI::updateGraph1Wave() {
     if (wavePaused || currentView != VIEW_GRAPH1) return;
 
+    TFT_eSPI& tft = display.getTft();
+    const int p1_x = PLOT_X, p1_y = 58, p1_w = PLOT_W, p1_h = 86;
+    const int p2_x = PLOT_X, p2_y = 178, p2_w = PLOT_W, p2_h = 88;
+
+    // Tọa độ quét hiện tại
+    int curX = p1_x + sweepX;
+    int clearX = p1_x + ((sweepX + 1) % p1_w);
+
+    // 1. Xóa vệt 6 pixel phía trước đầu quét (Sweep Erase) để vẽ nét mới mượt mà
+    tft.fillRect(clearX, p1_y, 6, p1_h, TFT_BLACK);
+    tft.fillRect(clearX, p2_y, 6, p2_h, TFT_BLACK);
+
+    // Khôi phục lưới nếu vệt xóa trùng tọa độ lưới
+    if (clearX % 50 <= 5) {
+        int gx = clearX - (clearX % 50) + 50;
+        if (gx >= clearX && gx < clearX + 6 && gx < p1_x + p1_w) {
+            for (int y = p1_y; y < p1_y + p1_h; y += 8) tft.drawPixel(gx, y, 0x2104);
+            for (int y = p2_y; y < p2_y + p2_h; y += 8) tft.drawPixel(gx, y, 0x2104);
+        }
+    }
+
+    // 2. Tính toán tọa độ Y cho TÍN HIỆU THÔ (0..4095 -> p1_y..p1_y+p1_h)
+    float rawVal = latestRealRaw;
+    int rawY = p1_y + p1_h - 2 - (int)((rawVal / 4095.0f) * (p1_h - 4));
+    rawY = constrain(rawY, p1_y + 2, p1_y + p1_h - 2);
+
+    // 3. Tính toán tọa độ Y cho TÍN HIỆU SẠCH (-500..+1000, 0 nằm ở giữa)
+    float filtVal = latestRealFilt;
+    int filtY = p2_y + (p2_h / 2) - (int)((filtVal / 600.0f) * 36.0f);
+    filtY = constrain(filtY, p2_y + 2, p2_y + p2_h - 2);
+
+    // 4. Vẽ đoạn thẳng nối giữa điểm trước và điểm hiện tại
+    if (lastRawY > 0 && sweepX > 0) {
+        int prevX = p1_x + sweepX - 1;
+        // Kênh Thô: Màu Đỏ rực
+        tft.drawLine(prevX, lastRawY, curX, rawY, TFT_RED);
+        // Kênh Sạch: Màu Xanh lá cây y tế (Vẽ 2 nét cho đậm rõ)
+        tft.drawLine(prevX, lastFiltY, curX, filtY, TFT_GREEN);
+        tft.drawLine(prevX, lastFiltY + 1, curX, filtY + 1, TFT_GREEN);
+    }
+
+    lastRawY = rawY;
+    lastFiltY = filtY;
+    sweepX = (sweepX + 1) % p1_w;
+
+    // 5. Cập nhật các nhãn số đo tức thời ở góc phải tiêu đề mỗi 400ms
     uint32_t now = millis();
-    uint32_t interval = (waveSpeed == 4) ? 15 : (waveSpeed == 2 ? 25 : 40);
-    if (now - lastWaveTick < interval) return;
-    lastWaveTick = now;
+    if (now - lastGraphTextUpdate > 400) {
+        lastGraphTextUpdate = now;
+        char buf[40];
 
-    // Sinh điểm sóng
-    wavePhase += 0.22f;
-    float sample = 1.65f;
-    if (waveMode == 0) {
-        sample = 1.65f + 1.25f * sinf(wavePhase) + 0.25f * sinf(wavePhase * 2.8f);
-    } else if (waveMode == 1) {
-        float modP = fmodf(wavePhase, 6.28f);
-        if (modP < 0.3f) sample = 1.65f + 1.4f * sinf(modP / 0.3f * 3.14f);
-        else if (modP < 0.6f) sample = 1.65f - 0.6f * sinf((modP - 0.3f) / 0.3f * 3.14f);
-        else sample = 1.65f + 0.15f * sinf(wavePhase);
-    } else {
-        // Sóng tam giác
-        float modP = fmodf(wavePhase, 3.14f);
-        sample = 0.4f + (modP / 3.14f) * 2.5f;
-    }
+        // Nhãn Raw tức thời
+        tft.fillRect(350, 41, 115, 14, CLR_SURFACE);
+        tft.setTextColor(TFT_RED, CLR_SURFACE);
+        tft.setTextDatum(TR_DATUM);
+        snprintf(buf, sizeof(buf), "Raw: %.0f", rawVal);
+        tft.drawString(buf, 465, 41);
 
-    for (uint8_t i = 0; i < WAVE_POINTS - 1; i++) {
-        waveBuffer[i] = waveBuffer[i + 1];
-    }
-    waveBuffer[WAVE_POINTS - 1] = sample;
-
-    TFT_eSPI& tft = display.getTft();
-    const int gx = 55;
-    const int gy = 44;
-    const int gw = 405;
-    const int gh = 175;
-
-    tft.fillRect(gx, gy + 2, gw - 2, gh - 4, TFT_BLACK);
-
-    // Lưới mờ
-    for (int y = gy + 35; y < gy + gh - 10; y += 35) {
-        for (int x = gx; x < gx + gw; x += 14) {
-            tft.drawPixel(x, y, CLR_BORDER);
+        // Nhãn Sinh hiệu (BPM & SpO2)
+        tft.fillRect(290, 159, 175, 14, CLR_SURFACE);
+        tft.setTextColor(TFT_GREEN, CLR_SURFACE);
+        tft.setTextDatum(TR_DATUM);
+        if (realEcgBpm > 0) {
+            snprintf(buf, sizeof(buf), "BPM: %.0f | SpO2: %.0f%%", realEcgBpm, realSpO2 > 0 ? realSpO2 : 98.0f);
+        } else {
+            snprintf(buf, sizeof(buf), "-- BPM | SpO2: --%%");
         }
-    }
-
-    // Vẽ nét sóng
-    float dx = (float)gw / (WAVE_POINTS - 1);
-    int lastX2 = gx, lastY2 = gy;
-    for (uint8_t i = 0; i < WAVE_POINTS - 1; i++) {
-        int x1 = gx + (int)(i * dx);
-        int y1 = gy + gh - (int)((waveBuffer[i] / 3.3f) * gh);
-        int x2 = gx + (int)((i + 1) * dx);
-        int y2 = gy + gh - (int)((waveBuffer[i + 1] / 3.3f) * gh);
-
-        y1 = constrain(y1, gy + 2, gy + gh - 2);
-        y2 = constrain(y2, gy + 2, gy + gh - 2);
-
-        tft.drawLine(x1, y1, x2, y2, CLR_CYAN);
-        tft.drawLine(x1, y1 + 1, x2, y2 + 1, CLR_CYAN);
-        lastX2 = x2;
-        lastY2 = y2;
-    }
-
-    // Điểm dạ quang ở đầu mút của sóng
-    tft.fillCircle(lastX2, lastY2, 4, CLR_AMBER);
-    tft.drawCircle(lastX2, lastY2, 5, CLR_WHITE);
-}
-
-// ==========================================
-// VIEW 2: ĐỒ THỊ 2 (TELEMETRY BARS & INSPECTOR)
-// ==========================================
-void AppUI::drawGraph2View() {
-    TFT_eSPI& tft = display.getTft();
-
-    const int cx = 15;
-    const int cy = 42;
-    const int cw = 450;
-    const int ch = 180;
-
-    tft.fillRoundRect(cx, cy, cw, ch, 8, CLR_SURFACE);
-    tft.drawRoundRect(cx, cy, cw, ch, 8, CLR_BORDER);
-
-    tft.setTextColor(CLR_AMBER, CLR_SURFACE);
-    tft.setTextDatum(TL_DATUM);
-    tft.drawString(tr("6 KÊNH TELEMETRY (CHẠM CỘT ĐỂ XEM CHI TIẾT)", "6 TELEMETRY CHANNELS (TAP BAR FOR DETAILS)"), cx + 12, cy + 8);
-
-    const int baselineY = cy + ch - 26;
-    tft.drawFastHLine(cx + 15, baselineY, cw - 30, CLR_BORDER);
-
-    const char* const labels_vi[] = { "Pin", "Nhiệt", "Độ ẩm", "Sáng", "Rung", "RAM" };
-    const char* const labels_en[] = { "Bat", "Temp", "Humi", "Light", "Vib", "RAM" };
-    const char* const* labels = (currentLang == LANG_VI) ? labels_vi : labels_en;
-    const uint16_t colors[] = { CLR_CYAN, CLR_AMBER, CLR_GREEN, CLR_YELLOW, CLR_MAGENTA, CLR_CYAN };
-    const int barWidth = 44;
-    const int spacing = 68;
-    const int startX = cx + 30;
-
-    for (uint8_t i = 0; i < 6; i++) {
-        int x = startX + i * spacing;
-        int barH = (int)((barValues[i] / 100.0f) * 110);
-        int barY = baselineY - barH;
-
-        bool isSel = (selectedBar == i);
-
-        tft.fillRoundRect(x, barY, barWidth, barH, 4, colors[i]);
-        tft.drawRoundRect(x, barY, barWidth, barH, 4, isSel ? CLR_AMBER : CLR_WHITE);
-
-        if (isSel) {
-            tft.drawRoundRect(x - 2, barY - 2, barWidth + 4, barH + 4, 6, CLR_AMBER);
-        }
-
-        tft.setTextColor(isSel ? CLR_AMBER : CLR_WHITE, CLR_SURFACE);
-        tft.setTextDatum(BC_DATUM);
-        char valStr[12];
-        snprintf(valStr, sizeof(valStr), "%d%%", barValues[i]);
-        tft.drawString(valStr, x + barWidth / 2, barY - 3);
-
-        tft.setTextColor(isSel ? CLR_AMBER : CLR_SILVER, CLR_SURFACE);
-        tft.setTextDatum(TC_DATUM);
-        tft.drawString(labels[i], x + barWidth / 2, baselineY + 6);
-    }
-
-    // Thanh Inspector hoặc nút điều khiển bên dưới
-    drawBarInspector();
-}
-
-void AppUI::drawBarInspector() {
-    TFT_eSPI& tft = display.getTft();
-
-    tft.fillRoundRect(15, 230, 450, 44, 6, CLR_SURFACE);
-    tft.drawRoundRect(15, 230, 450, 44, 6, CLR_BORDER);
-
-    if (selectedBar >= 0 && selectedBar < 6) {
-        const char* const fullNames_vi[] = {
-            "Dung lượng Pin dự phòng",
-            "Nhiệt độ vi xử lý CPU",
-            "Độ ẩm môi trường phòng",
-            "Cường độ ánh sáng phòng",
-            "Mức rung động cảm biến",
-            "Dung lượng bộ nhớ RAM"
-        };
-        const char* const fullNames_en[] = {
-            "Backup Battery Level",
-            "CPU Core Temperature",
-            "Ambient Room Humidity",
-            "Ambient Light Intensity",
-            "Sensor Vibration Level",
-            "RAM Memory Usage"
-        };
-        const char* const eval_vi[] = {
-            "RẤT TỐT", "MÁT MẺ", "LÝ TƯỞNG", "ỔN ĐỊNH", "AN TOÀN", "XUẤT SẮC"
-        };
-        const char* const eval_en[] = {
-            "EXCELLENT", "COOL", "OPTIMAL", "STABLE", "NORMAL", "SUPERB"
-        };
-
-        const char* const* fullNames = (currentLang == LANG_VI) ? fullNames_vi : fullNames_en;
-        const char* const* eval = (currentLang == LANG_VI) ? eval_vi : eval_en;
-
-        tft.setTextColor(CLR_WHITE, CLR_SURFACE);
-        tft.setTextDatum(ML_DATUM);
-        char buf[96];
-        snprintf(buf, sizeof(buf), "%s: %u%% [%s]", fullNames[selectedBar], barValues[selectedBar], eval[selectedBar]);
-        tft.drawString(buf, 25, 252);
-    } else {
-        // Nút Live stream Toggle
-        tft.fillRoundRect(25, 234, 180, 36, 4, liveStreamBars ? CLR_GREEN : CLR_SURFACE_HI);
-        tft.drawRoundRect(25, 234, 180, 36, 4, CLR_WHITE);
-        tft.setTextColor(liveStreamBars ? TFT_BLACK : CLR_SILVER, liveStreamBars ? CLR_GREEN : CLR_SURFACE_HI);
-        tft.setTextDatum(MC_DATUM);
-        tft.drawString(liveStreamBars 
-            ? tr("TỰ ĐỘNG ĐO: BẬT", "AUTO STREAM: ON") 
-            : tr("TỰ ĐỘNG ĐO: TẮT", "AUTO STREAM: OFF"), 115, 252);
-
-        // Nút làm mới tức thì
-        tft.fillRoundRect(240, 234, 210, 36, 4, CLR_SURFACE_HI);
-        tft.drawRoundRect(240, 234, 210, 36, 4, CLR_CYAN);
-        tft.setTextColor(CLR_WHITE, CLR_SURFACE_HI);
-        tft.drawString(tr("LÀM MỚI TOÀN BỘ", "REFRESH ALL"), 345, 252);
-    }
-}
-
-void AppUI::randomizeGraph2Bars() {
-    for (uint8_t i = 0; i < 6; i++) {
-        int delta = random(-6, 7);
-        int nv = barValues[i] + delta;
-        barValues[i] = constrain(nv, 25, 98);
-    }
-    if (currentView == VIEW_GRAPH2) {
-        drawGraph2View();
+        tft.drawString(buf, 465, 159);
     }
 }
 
 // ==========================================
-// VIEW 3: CÀI ĐẶT HỆ THỐNG (SETTINGS)
+// VIEW 2: CÀI ĐẶT HỆ THỐNG & AI (SETTINGS)
 // ==========================================
 void AppUI::drawSettingsView() {
     TFT_eSPI& tft = display.getTft();
@@ -730,54 +657,51 @@ void AppUI::drawSettingsView() {
     tft.drawRoundRect(370, 81, 34, 28, 4, CLR_BORDER);
     tft.drawString("+", 387, 95);
 
-    // Hàng 3: Thời gian vuốt ve Ami (y: 116..150)
+    // Hàng 3: Mô hình AI dự đoán nhịp tim (y: 116..150)
     tft.fillRoundRect(15, 116, 450, 34, 6, CLR_SURFACE);
     tft.drawRoundRect(15, 116, 450, 34, 6, CLR_BORDER);
+    tft.setTextColor(CLR_WHITE, CLR_SURFACE);
     tft.setTextDatum(ML_DATUM);
-    tft.drawString(tr("Thời gian vuốt ve Ami:", "Ami Pet Timeout:"), 25, 133);
+    tft.drawString(tr("Mô hình AI nhịp tim:", "ECG AI Model:"), 25, 133);
+
+    tft.fillRoundRect(310, 119, 130, 28, 4, aiEnabled ? CLR_GREEN : CLR_SURFACE_HI);
+    tft.drawRoundRect(310, 119, 130, 28, 4, CLR_WHITE);
+    tft.setTextColor(aiEnabled ? TFT_BLACK : CLR_SILVER, aiEnabled ? CLR_GREEN : CLR_SURFACE_HI);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(aiEnabled ? tr("BẬT (ON)", "ON") : tr("TẮT (OFF)", "OFF"), 375, 133);
+
+    // Hàng 4: Thời gian vuốt ve Ami (y: 154..188)
+    tft.fillRoundRect(15, 154, 450, 34, 6, CLR_SURFACE);
+    tft.drawRoundRect(15, 154, 450, 34, 6, CLR_BORDER);
+    tft.setTextColor(CLR_WHITE, CLR_SURFACE);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(tr("Thời gian vuốt ve Ami:", "Ami Pet Timeout:"), 25, 171);
 
     const uint8_t petOpts[] = { 4, 6, 10 };
     for (uint8_t i = 0; i < 3; i++) {
         int bx = 240 + i * 68;
         bool isSel = (petTimeoutSec == petOpts[i]);
-        tft.fillRoundRect(bx, 119, 60, 28, 4, isSel ? CLR_CYAN : CLR_SURFACE_HI);
-        tft.drawRoundRect(bx, 119, 60, 28, 4, isSel ? CLR_WHITE : CLR_BORDER);
+        tft.fillRoundRect(bx, 157, 60, 28, 4, isSel ? CLR_CYAN : CLR_SURFACE_HI);
+        tft.drawRoundRect(bx, 157, 60, 28, 4, isSel ? CLR_WHITE : CLR_BORDER);
         tft.setTextColor(isSel ? TFT_BLACK : CLR_WHITE, isSel ? CLR_CYAN : CLR_SURFACE_HI);
         tft.setTextDatum(MC_DATUM);
         char pBuf[12];
         snprintf(pBuf, sizeof(pBuf), "%us", petOpts[i]);
-        tft.drawString(pBuf, bx + 30, 133);
+        tft.drawString(pBuf, bx + 30, 171);
     }
 
-    // Hàng 4: Tự động đổi lời khuyên (y: 154..188)
-    tft.fillRoundRect(15, 154, 450, 34, 6, CLR_SURFACE);
-    tft.drawRoundRect(15, 154, 450, 34, 6, CLR_BORDER);
-    tft.setTextDatum(ML_DATUM);
-    tft.setTextColor(CLR_WHITE, CLR_SURFACE);
-    tft.drawString(tr("Tự đổi lời khuyên (8s):", "Auto-Cycle Advice (8s):"), 25, 171);
-
-    tft.fillRoundRect(330, 157, 115, 28, 4, autoCycleAdvice ? CLR_GREEN : CLR_SURFACE_HI);
-    tft.drawRoundRect(330, 157, 115, 28, 4, CLR_WHITE);
-    tft.setTextColor(autoCycleAdvice ? TFT_BLACK : CLR_SILVER, autoCycleAdvice ? CLR_GREEN : CLR_SURFACE_HI);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString(autoCycleAdvice ? tr("BẬT (ON)", "ON") : tr("TẮT (OFF)", "OFF"), 387, 171);
-
-    // Hàng 5: Biểu cảm của Ami (y: 192..226)
+    // Hàng 5: Tự động đổi lời khuyên (y: 192..226)
     tft.fillRoundRect(15, 192, 450, 34, 6, CLR_SURFACE);
     tft.drawRoundRect(15, 192, 450, 34, 6, CLR_BORDER);
-    tft.setTextDatum(ML_DATUM);
     tft.setTextColor(CLR_WHITE, CLR_SURFACE);
-    tft.drawString(tr("Biểu cảm của Ami:", "Ami's Expression:"), 25, 209);
+    tft.setTextDatum(ML_DATUM);
+    tft.drawString(tr("Tự đổi lời khuyên (8s):", "Auto-Cycle Advice:"), 25, 209);
 
-    const char* const emoNames[] = { "Normal", "Happy", "Idle", "Info" };
-    for (uint8_t i = 0; i < 4; i++) {
-        int ex = 195 + i * 64;
-        tft.fillRoundRect(ex, 195, 58, 28, 4, CLR_SURFACE_HI);
-        tft.drawRoundRect(ex, 195, 58, 28, 4, CLR_BORDER);
-        tft.setTextColor(CLR_WHITE, CLR_SURFACE_HI);
-        tft.setTextDatum(MC_DATUM);
-        tft.drawString(emoNames[i], ex + 29, 209);
-    }
+    tft.fillRoundRect(310, 195, 130, 28, 4, autoCycleAdvice ? CLR_GREEN : CLR_SURFACE_HI);
+    tft.drawRoundRect(310, 195, 130, 28, 4, CLR_WHITE);
+    tft.setTextColor(autoCycleAdvice ? TFT_BLACK : CLR_SILVER, autoCycleAdvice ? CLR_GREEN : CLR_SURFACE_HI);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(autoCycleAdvice ? tr("BẬT (ON)", "ON") : tr("TẮT (OFF)", "OFF"), 375, 209);
 
     // Hàng 6: Nút Cân chỉnh cảm ứng (y: 232..272)
     tft.fillRoundRect(40, 232, 400, 40, 6, CLR_SURFACE_HI);
@@ -821,27 +745,19 @@ void AppUI::update() {
         updateGraph1Wave();
     }
 
-    // 3. Tự động stream dao động nhẹ ở View 2 nếu đang bật Live mode
-    if (currentView == VIEW_GRAPH2 && liveStreamBars && selectedBar < 0) {
-        if (now - lastBarStreamTick >= 1500) {
-            lastBarStreamTick = now;
-            randomizeGraph2Bars();
-        }
-    }
-
-    // 4. Cập nhật thông số phần cứng định kỳ mỗi 2 giây ở View 0
+    // 3. Cập nhật thông số phần cứng định kỳ mỗi 2 giây ở Trang Chủ
     if (currentView == VIEW_MAIN && (now - lastMetricsUpdate >= 2000)) {
         lastMetricsUpdate = now;
         updateRealMetrics();
     }
 
-    // 5. Cập nhật đồng hồ và header mỗi 1 giây
+    // 4. Cập nhật đồng hồ và header mỗi 1 giây
     if (now - lastHeaderUpdate >= 1000) {
         lastHeaderUpdate = now;
         updateHeaderStats();
     }
 
-    // 6. Xử lý cảm ứng
+    // 5. Xử lý cảm ứng
     uint16_t tx = 0, ty = 0;
     if (display.getTouch(&tx, &ty)) {
         if (now - lastTouchTime >= 180) {
@@ -858,14 +774,12 @@ void AppUI::handleTouch(uint16_t tx, uint16_t ty) {
         return;
     }
 
-    // A. Chạm vào thanh Navigation Menu ở đáy màn hình (Y: 278..320)
+    // A. Chạm vào thanh Navigation Menu ở đáy màn hình (Y: 278..320, 3 Tabs x 160px)
     if (ty >= 278) {
-        if (tx < 120) {
+        if (tx < 160) {
             switchView(VIEW_MAIN);
-        } else if (tx < 240) {
+        } else if (tx < 320) {
             switchView(VIEW_GRAPH1);
-        } else if (tx < 360) {
-            switchView(VIEW_GRAPH2);
         } else {
             switchView(VIEW_SETTINGS);
         }
@@ -911,67 +825,10 @@ void AppUI::handleTouch(uint16_t tx, uint16_t ty) {
         }
     }
     else if (currentView == VIEW_GRAPH1) {
-        // Nút Tốc độ: (22, 234, 100, 36)
-        if (tx >= 22 && tx <= 122 && ty >= 230 && ty <= 274) {
-            waveSpeed = (waveSpeed == 1) ? 2 : ((waveSpeed == 2) ? 4 : 1);
-            drawGraph1View();
-            return;
-        }
-        // Nút Dạng sóng: (130, 234, 140, 36)
-        if (tx >= 130 && tx <= 270 && ty >= 230 && ty <= 274) {
-            waveMode = (waveMode + 1) % 3;
-            drawGraph1View();
-            return;
-        }
-        // Nút Tạm dừng / Tiếp tục: (280, 234, 95, 36)
-        if (tx >= 280 && tx <= 375 && ty >= 230 && ty <= 274) {
+        // Chạm vào vùng đồ thị để Tạm dừng / Tiếp tục quét sóng (Pause/Resume)
+        if (ty >= 38 && ty <= 274) {
             wavePaused = !wavePaused;
-            drawGraph1View();
             return;
-        }
-    }
-    else if (currentView == VIEW_GRAPH2) {
-        // Kiểm tra chạm vào 6 cột để xem Inspector
-        const int cx = 15;
-        const int cy = 42;
-        const int ch = 180;
-        const int baselineY = cy + ch - 26;
-        const int barWidth = 44;
-        const int spacing = 68;
-        const int startX = cx + 30;
-
-        bool touchedBar = false;
-        for (uint8_t i = 0; i < 6; i++) {
-            int bx = startX + i * spacing;
-            if (tx >= bx - 5 && tx <= bx + barWidth + 5 && ty >= cy + 20 && ty <= baselineY + 15) {
-                selectedBar = (selectedBar == i) ? -1 : i; // Chạm lần 2 thì bỏ chọn
-                drawGraph2View();
-                touchedBar = true;
-                break;
-            }
-        }
-        if (touchedBar) return;
-
-        // Bấm nút bên dưới thanh Inspector
-        if (selectedBar < 0) {
-            // Nút Toggle Live stream: (25, 234, 180, 36)
-            if (tx >= 25 && tx <= 205 && ty >= 230 && ty <= 274) {
-                liveStreamBars = !liveStreamBars;
-                drawBarInspector();
-                return;
-            }
-            // Nút Làm mới toàn bộ: (240, 234, 210, 36)
-            if (tx >= 240 && tx <= 450 && ty >= 230 && ty <= 274) {
-                randomizeGraph2Bars();
-                return;
-            }
-        } else {
-            // Đang mở chi tiết, chạm thanh bên dưới để đóng lại
-            if (ty >= 230 && ty <= 274) {
-                selectedBar = -1;
-                drawGraph2View();
-                return;
-            }
         }
     }
     else if (currentView == VIEW_SETTINGS) {
@@ -999,8 +856,17 @@ void AppUI::handleTouch(uint16_t tx, uint16_t ty) {
             }
         }
 
-        // Hàng 3: Chọn thời gian Pet Timeout: 4s, 6s, 10s (y: 116..150)
+        // Hàng 3: Nút Bật/Tắt Mô hình AI nhịp tim (y: 116..150)
         if (ty >= 116 && ty <= 150) {
+            if (tx >= 300 && tx <= 445) {
+                aiEnabled = !aiEnabled;
+                drawSettingsView();
+                return;
+            }
+        }
+
+        // Hàng 4: Chọn thời gian Pet Timeout: 4s, 6s, 10s (y: 154..188)
+        if (ty >= 154 && ty <= 188) {
             const uint8_t petOpts[] = { 4, 6, 10 };
             for (uint8_t i = 0; i < 3; i++) {
                 int bx = 240 + i * 68;
@@ -1013,25 +879,12 @@ void AppUI::handleTouch(uint16_t tx, uint16_t ty) {
             }
         }
 
-        // Hàng 4: Nút Bật/Tắt xoay lời khuyên (y: 154..188)
-        if (ty >= 154 && ty <= 188) {
-            if (tx >= 320 && tx <= 450) {
+        // Hàng 5: Nút Bật/Tắt xoay lời khuyên (y: 192..226)
+        if (ty >= 192 && ty <= 226) {
+            if (tx >= 300 && tx <= 445) {
                 autoCycleAdvice = !autoCycleAdvice;
                 drawSettingsView();
                 return;
-            }
-        }
-
-        // Hàng 5: Nút Biểu cảm Ami: Normal, Happy, Idle, Info (y: 192..226)
-        if (ty >= 192 && ty <= 226) {
-            const char* const emoTags[] = { "normal", "happy", "idle1", "give_info" };
-            for (uint8_t i = 0; i < 4; i++) {
-                int ex = 195 + i * 64;
-                if (tx >= ex && tx <= ex + 58) {
-                    if (cornerGif) cornerGif->playByName(emoTags[i]);
-                    updateHeaderStats();
-                    return;
-                }
             }
         }
 
