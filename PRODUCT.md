@@ -36,3 +36,5 @@ product
 - High contrast (> 4.5:1) for all labels against dark backgrounds (Graphite/Navy with Cyan/Amber/White).
 - Visual feedback on every touch (button depression highlight / sound or border feedback).
 - Distinct color coding with text labels to support color vision deficiencies.
+
+## Access
